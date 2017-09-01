@@ -10,15 +10,21 @@ import json
 import datetime
 from enum import Enum
 from functools import reduce
+from typing import Dict
+
 import numpy as np
 import base64
 
 
 def qualname(obj):
+    """
+        __qualname__ was added in python 3.5, and we rely upon it. It is possible to back port this library by providing
+         an alternative implementation of this method.
+    """
     return obj.__qualname__
 
+
 _MAGIC_PY_CLASS = '__py_class__'
-_MAGIC_PY_DATA = '__py_data__'
 
 
 def encode(obj, allow_implicit_simples=False):
@@ -39,7 +45,7 @@ def decode(str_encoded):
         :param str_encoded: String encoded with 'encode(obj)' function
         :return: Python object
     """
-    return json.loads(str_encoded, object_hook=_decode_serialized_dictionary)
+    return json.loads(str_encoded, object_hook=from_dict)
 
 
 class _PythonClassName:
@@ -64,7 +70,8 @@ class _PythonClassName:
         return cls(module_name, class_name)
 
     @classmethod
-    def from_type(cls, typ):
+    def from_type(cls, typ: object):
+        # noinspection PyTypeChecker
         return cls(typ.__module__, qualname(typ))
 
     @property
@@ -90,9 +97,55 @@ class _PythonClassName:
         return cls(*args, **kwargs)
 
 
-def _decode_serialized_dictionary(dic):
+def to_dict(obj: object, allow_implicit_simples=False) -> Dict:
     """
-        Decode using the following convention, dictionaries without magic string are considered built-ins
+        Recursively convert object to dictionary primitives, with additional type hint to allow reconstruction
+            of an identical object from the dictionary.
+
+        :param obj: Object to be traversed recursively
+        :param allow_implicit_simples: Try to serialize not explicitly supported types
+
+        Note: Returned dictionary contains the entire tree structure of the members of the class
+    """
+
+    result = dict()
+    _add_type_key(result, obj)
+
+    # Convert Serializable objects
+    if isinstance(obj, Serializable):
+        result.update(obj.to_dict())
+
+    # Non-Serializable - Primitive / Special / Unsupported
+    else:
+        handler = Handlers.find_for(type(obj))
+
+        # Specially Supported
+        if handler != Handlers.Default:
+            result.update(handler.to_dict(obj))
+
+        else:
+            # Assume primitives have no __dict__
+            if not hasattr(obj, '__dict__'):
+                result = obj
+
+            # Unsupported
+            else:
+                if allow_implicit_simples:
+                    result.update(handler.to_dict(obj))
+                else:
+                    raise Exception('Unable to implicitly convert non Serializable objects to dictionary')
+
+    # Update all sub tree of each member
+    if type(result) == dict:
+        for key, value in result.items():
+            result[key] = to_dict(value, allow_implicit_simples)
+
+    return result
+
+
+def from_dict(dic: Dict) -> object:
+    """
+        Recursively decode using the following convention, dictionaries without magic string are considered built-ins
         {
             '__py_class__' : '<module name>/<class_name>'
             ... rest of data ...
@@ -100,6 +153,11 @@ def _decode_serialized_dictionary(dic):
         :param dic: Dictionary Object
         :return Instance of an object
     """
+    # Decode inner objects
+    for key, value in dic.items():
+        if type(value) == dict:
+            dic[key] = from_dict(value)
+
     # Resolve only dictionaries with magic
     if _MAGIC_PY_CLASS not in dic:
         # Pass through the dictionary as built-in
@@ -120,8 +178,8 @@ class Serializable(object):
         """
             Default implementation for Simple objects (properties are either built-in or simple)
             Generally, the state of simple objects is stored in the __dict__ attribute
+            Note: The values of the dict are allowed to be instances of Serializable, NOT ONLY primitives
         """
-        # Append class name
         dic = dict()
 
         # Append all variables
@@ -137,9 +195,8 @@ class Serializable(object):
                 # Store class name to allow later de-serialization using handler
                 dic[key][_MAGIC_PY_CLASS] = str(_PythonClassName.from_type(type(value)))
 
-            # Encode implicitly objects as Serializable
+            # Pass objects assuming that they can be serialized implicitly
             else:
-                # dic[key] = SerializableWrapper.wrap_obj(value).to_dict()
                 dic[key] = value
 
         return dic
@@ -409,6 +466,10 @@ def is_object_serializable(obj):
     return handler != Handlers.Default
 
 
+def _add_type_key(dic, obj):
+    dic[_MAGIC_PY_CLASS] = str(_PythonClassName.from_type(type(obj)))
+
+
 class _JsonEncoderSimple(json.JSONEncoder):
     """
         Encode compound objects - any of: built-in / Serializable / JsonPickle
@@ -416,6 +477,7 @@ class _JsonEncoderSimple(json.JSONEncoder):
     """
 
     def __init__(self, allow_implicit_simples=False, **kw):
+        # noinspection PyArgumentList
         super(_JsonEncoderSimple, self).__init__(**kw)
         self.allow_implicit_simples = allow_implicit_simples
 
@@ -424,9 +486,8 @@ class _JsonEncoderSimple(json.JSONEncoder):
     def default(self, obj):
         handler = Handlers.find_for(type(obj))
 
-        dic = {
-            _MAGIC_PY_CLASS: str(_PythonClassName.from_type(type(obj)))
-        }
+        dic = {}
+        _add_type_key(dic, obj)
 
         if handler != Handlers.Default:
             dic.update(handler.to_dict(obj))

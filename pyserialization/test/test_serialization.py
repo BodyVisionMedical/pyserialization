@@ -8,8 +8,10 @@ from enum import Enum
 from time import perf_counter
 
 import jsonpickle
+import json
 import numpy as np
 from jsonpickle.ext.numpy import register_handlers
+# noinspection PyPackageRequirements
 from testfixtures import tempdir
 
 import pyserialization
@@ -88,6 +90,29 @@ class Mocks:
             self._time_obj = datetime.time(21, 45, 32, 38721)
             self._datetime_obj = datetime.datetime(2001, 7, 16, 19, 23, 11, 986523)
 
+    class CustomToDict(Serializable):
+        def __init__(self) -> None:
+            super().__init__()
+
+            self.path = Mocks.SimpleNumPy()
+            self.stub = Mocks.Simple()
+
+        def to_dict(self):
+            return {
+                'p': self.path,
+                's': self.stub,
+            }
+
+        @classmethod
+        def from_dict(cls, dic):
+            instance = cls()
+            instance.path = dic['p']
+            instance.stub = dic['s']
+
+            return instance
+
+    CustomList = [4, 5, dict(a='A', b='B'), SimpleNumPy()]
+
 
 class TestBenchmarkHelper(unittest.TestCase):
     # Prepare dictionary for results in format: 'test function' -> runtime_ms
@@ -112,7 +137,7 @@ class TestBenchmarkHelper(unittest.TestCase):
         for _ in range(times):
             func()
 
-        runtime_ms = time_start - perf_counter() * 1000
+        runtime_ms = perf_counter() * 1000 - time_start
 
         time_avg_ms = runtime_ms / times
         cls._results[func] = time_avg_ms
@@ -226,7 +251,7 @@ class TestSerializer(TestBenchmarkHelper):
         self.consts.num_layer_objects = 100
         self.consts.num_pts_array = 10
 
-        self.consts.times_to_run = 2
+        self.consts.times_to_run = 10
 
     @staticmethod
     def str_dump(path, some_str):
@@ -238,9 +263,9 @@ class TestSerializer(TestBenchmarkHelper):
         with open(path, "r") as text_file:
             return text_file.read()
 
-    def encode_io_decode_cycle(self, encoder, decoder, path_temp):
+    def encode_io_decode_cycle(self, obj, encoder, decoder, path_temp):
         # Encode
-        str_enc_1 = encoder(Mocks.SimpleNumPy())
+        str_enc_1 = encoder(obj)
 
         # Dump to Disk
         self.str_dump(path_temp, str_enc_1)
@@ -257,6 +282,18 @@ class TestSerializer(TestBenchmarkHelper):
 
         # Assume no transient fields...
         self.assertTrue(NestedComparator().compare(obj, obj_decoded))
+
+    def verify_to_dict_from_dict_cycle(self, obj, **kw):
+        dic = pyserialization.to_dict(obj, **kw)
+
+        # Encode & Decode as a string to lose any references that might have been left out
+        str_encoded = json.dumps(dic)
+        dic_decoded = json.loads(str_encoded)
+
+        obj_reconstructed = pyserialization.from_dict(dic_decoded)
+
+        # Assume no transient fields...
+        self.assertTrue(NestedComparator().compare(obj, obj_reconstructed))
 
     @tempdir()
     def test_measure_encode(self, tmp_dir):
@@ -279,12 +316,37 @@ class TestSerializer(TestBenchmarkHelper):
 
         # Benchmark and save results in dictionary
         self.benchmark_record_result(
-            lambda: self.encode_io_decode_cycle(pyserialization.encode, pyserialization.decode, path_temp_file),
+            lambda: self.encode_io_decode_cycle(
+                Mocks.SimpleNumPy(), pyserialization.encode, pyserialization.decode, path_temp_file
+            ),
             times=self.consts.times_to_run
         )
 
         self.benchmark_record_result(
-            lambda: self.encode_io_decode_cycle(encode_jsonpickle, decode_jsonpickle, path_temp_file),
+            lambda: self.encode_io_decode_cycle(
+                Mocks.CustomToDict(), pyserialization.encode, pyserialization.decode, path_temp_file
+            ),
+            times=self.consts.times_to_run
+        )
+
+        self.benchmark_record_result(
+            lambda: self.encode_io_decode_cycle(
+                Mocks.BigNumPy(), pyserialization.encode, pyserialization.decode, path_temp_file
+            ),
+            times=self.consts.times_to_run
+        )
+
+        self.benchmark_record_result(
+            lambda: self.encode_io_decode_cycle(
+                Mocks.CustomToDict(), encode_jsonpickle, decode_jsonpickle, path_temp_file
+            ),
+            times=self.consts.times_to_run
+        )
+
+        self.benchmark_record_result(
+            lambda: self.encode_io_decode_cycle(
+                Mocks.BigNumPy(), encode_jsonpickle, decode_jsonpickle, path_temp_file
+            ),
             times=self.consts.times_to_run
         )
 
@@ -298,9 +360,7 @@ class TestSerializer(TestBenchmarkHelper):
 
         self.verify_encode_decode_cycle(Mocks.Simple())
 
-        self.verify_encode_decode_cycle(
-            [4, 5, dict(a='A', b='B'), Mocks.SimpleNumPy()]
-        )
+        self.verify_encode_decode_cycle(Mocks.CustomList)
 
     def test_serializable_big_numpy(self):
         """
@@ -330,6 +390,15 @@ class TestSerializer(TestBenchmarkHelper):
     def test_serializable_datetime(self):
         self.verify_encode_decode_cycle(Mocks.DateAndTime())
 
+    def test_compound(self):
+        self.verify_encode_decode_cycle(Mocks.CustomToDict())
+
+    def test_to_dict(self):
+        self.verify_to_dict_from_dict_cycle(Mocks.CustomToDict())
+        self.verify_to_dict_from_dict_cycle(Mocks.DateAndTime())
+        self.verify_to_dict_from_dict_cycle(Mocks.SimpleNumPy())
+        self.verify_to_dict_from_dict_cycle(Mocks.BigNumPy())
+        self.verify_to_dict_from_dict_cycle(Mocks.BigNumPy())
 
 if __name__ == '__main__':
     unittest.main()

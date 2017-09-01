@@ -5,6 +5,8 @@ from .simple import Serializable
 from .simple import decode
 from .simple import encode
 from .simple import is_object_serializable
+from .simple import to_dict
+from .simple import from_dict
 
 
 def save(obj, path_file: Union[str, Path], allow_implicit_simples=False):
