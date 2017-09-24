@@ -10,12 +10,13 @@ import json
 import datetime
 from enum import Enum
 from functools import reduce
-import numpy as np
+import numpy  # note this name will be used inside encoded strings - do not alias
 import base64
 
 
 def qualname(obj):
     return obj.__qualname__
+
 
 _MAGIC_PY_CLASS = '__py_class__'
 _MAGIC_PY_DATA = '__py_data__'
@@ -135,6 +136,7 @@ class Serializable(object):
                 dic[key] = value.to_dict()
 
                 # Store class name to allow later de-serialization using handler
+                # noinspection PyTypeChecker
                 dic[key][_MAGIC_PY_CLASS] = str(_PythonClassName.from_type(type(value)))
 
             # Encode implicitly objects as Serializable
@@ -209,6 +211,7 @@ class Handlers:
             dic = SerializableWrapper.wrap_obj(obj).to_dict()
 
             # Make sure de-serialization happens using SerializableWrapper
+            # noinspection PyTypeChecker
             dic[_MAGIC_PY_CLASS] = str(_PythonClassName.from_type(SerializableWrapper))
             return dic
 
@@ -236,11 +239,11 @@ class Handlers:
 
     # noinspection PyClassHasNoInit
     class NumPyNdArray(CustomHandler):
-        type = np.ndarray
+        type = numpy.ndarray
 
         @staticmethod
         def to_dict(obj):
-            if obj.size < 100 or obj.__class__ == np.core.records.recarray:
+            if obj.size < 100 or obj.__class__ == numpy.core.records.recarray:
                 return SerializableWrapper.wrap_obj(
                     {
                         'array': obj.tolist(),
@@ -252,7 +255,7 @@ class Handlers:
                 if not obj.flags.c_contiguous:
                     # b64encode needs contiguous array
                     # (this shouldn't happen for video frames, they should be already contiguous)
-                    obj = np.ascontiguousarray(obj)
+                    obj = numpy.ascontiguousarray(obj)
                 return SerializableWrapper.wrap_obj(
                     {
                         'array_base64': base64.b64encode(obj).decode(),
@@ -268,29 +271,29 @@ class Handlers:
 
             is_recarray = data['__py_class__'] in ['numpy.core.records/recarray', 'numpy/recarray']
             if is_recarray:
-                dtype = np.dtype(eval(wrapper['dtype']))
-                array = np.array(wrapper['array'])
+                dtype = numpy.dtype(eval(wrapper['dtype']))
+                array = numpy.array(wrapper['array'])
                 record_size = len(dtype)
-                return np.core.records.fromarrays([array[..., x] for x in range(record_size)], dtype=dtype)
+                return numpy.core.records.fromarrays([array[..., x] for x in range(record_size)], dtype=dtype)
 
             if isinstance(wrapper, dict):
                 if wrapper:
-                    dtype = np.dtype(wrapper['dtype'])
+                    dtype = numpy.dtype(wrapper['dtype'])
                 if 'array_base64' not in wrapper:
                     array = wrapper['array']
                 else:
                     shape = tuple(wrapper['shape'])
                     array_b64 = wrapper['array_base64']
                     buf = base64.decodebytes(array_b64.encode())
-                    return np.frombuffer(buf, dtype).reshape(shape)
+                    return numpy.frombuffer(buf, dtype).reshape(shape)
             else:
                 array = wrapper
 
-            return np.array(array, dtype)
+            return numpy.array(array, dtype)
 
     # noinspection PyClassHasNoInit
     class NumPyGeneric(CustomHandler):
-        type = np.generic
+        type = numpy.generic
 
         @staticmethod
         def to_dict(obj):
@@ -298,7 +301,7 @@ class Handlers:
 
         @staticmethod
         def from_dict(data):
-            return np.array([SerializableWrapper.from_dict(data)])[0]
+            return numpy.array([SerializableWrapper.from_dict(data)])[0]
 
     # noinspection PyClassHasNoInit
     class SetSerializable(CustomHandler):
