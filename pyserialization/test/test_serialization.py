@@ -82,6 +82,14 @@ class Mocks:
             self.big_numpy1 = x + y  # type int32
             self.big_numpy2 = x.astype('float64')
 
+    class RecarrayNumpy(Serializable):
+        """ Example of numpy recarray container object """
+
+        def __init__(self):
+            self.recarray1 = np.rec.array(np.zeros((3, 2), dtype=[('a', 'u4'), ('b', 'f8')]))
+            self.recarray1.a[2, 1] = 50
+            self.recarray1.b[1, 0] = 67.3
+
     class DateAndTime(Serializable):
         """ Example of datetime objects"""
 
@@ -203,6 +211,13 @@ class NestedComparator(object):
             # only one of them is None
             print("Only one of the values is None: left value {}, right value {}".format(v1, v2))
             return False
+
+        if isinstance(v1, np.recarray) or isinstance(v2, np.recarray):
+            if not isinstance(v1, np.recarray) and isinstance(v2, np.recarray):
+                return False
+            if v1.dtype != v2.dtype:
+                return False
+            return all(np.allclose(v1[name], v2[name]) for name in v1.dtype.names)
 
         if isinstance(v1, np.ndarray) or isinstance(v2, np.ndarray):
             if np.allclose(v1, v2):
@@ -361,6 +376,13 @@ class TestSerializer(TestBenchmarkHelper):
         self.verify_encode_decode_cycle(Mocks.Simple())
 
         self.verify_encode_decode_cycle(Mocks.CustomList)
+
+    def test_serializable_numpy_recarray(self):
+        """
+            Verify whole cycle in the case of big numpy arrays
+        """
+
+        self.verify_encode_decode_cycle(Mocks.RecarrayNumpy())
 
     def test_serializable_big_numpy(self):
         """
