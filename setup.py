@@ -7,7 +7,7 @@ setup(
     author_email='engineering@bodyvisionmedical.com',
     url='https://github.com/BodyVisionMedical/pyserialization',
     license='LGPL',
-    version='0.1.1',
+    version='0.1.2',
     test_suite='nose.collector',
     tests_require=['nose'],
     packages=['pyserialization'],
