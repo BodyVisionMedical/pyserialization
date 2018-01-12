@@ -9,7 +9,7 @@ setup(
     license='LGPL',
     version='0.1.2',
     test_suite='nose.collector',
-    tests_require=['nose'],
+    tests_require=['nose', 'testfixtures],
     packages=['pyserialization'],
     install_requires=['jsonpickle', 'numpy'],
     python_requires=">=3.5",
